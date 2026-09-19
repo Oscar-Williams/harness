@@ -65,12 +65,16 @@ else
 fi
 _display+=$'\n'
 
-total_lines="$(printf '%s' "${result}" | wc -l | tr -d ' ')"
+# Display copy of the result: flat JSON objects (the bash envelope) render
+# as YAML so embedded newlines read as real lines, not \n escapes.
+_lib="$(dirname "$(readlink -f "$0")")/../../lib"
+_disp="$(printf '%s' "${result}" | "${_lib}/render-result" 2>/dev/null || printf '%s' "${result}")"
+total_lines="$(printf '%s' "${_disp}" | wc -l | tr -d ' ')"
 if (( total_lines > 30 )); then
-  _display+="$(head -30 <<< "${result}" | sed 's/^/  /')"
+  _display+="$(head -30 <<< "${_disp}" | sed 's/^/  /')"
   _display+="$(printf '\n  ... (%d more lines)' $(( total_lines - 30 )))"
 else
-  _display+="$(sed 's/^/  /' <<< "${result}")"
+  _display+="$(sed 's/^/  /' <<< "${_disp}")"
 fi
 
 [[ "${error}" == "true" ]] && _display+=$'\n  (error)'

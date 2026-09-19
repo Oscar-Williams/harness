@@ -61,6 +61,16 @@ Returns a JSON object with the tool definition:
 
 Receives `input_schema`-shaped JSON on stdin. Stdout becomes the tool result sent back to the model. Stderr goes to `HARNESS_LOG`. A non-zero exit marks the result as `error: true`.
 
+### Standard input keys
+
+Tools MAY accept an `intent` input key (all bundled core tools do). It carries
+a short human-readable phrase describing what the call is trying to
+accomplish. Tools MUST ignore it during execution; it exists for observers:
+UIs render it as the collapsed summary over the call's result (e.g.
+`<details><summary>`), and `tool_done` persists it as `intent:` frontmatter
+on the saved `tool_result` message so history consumers can read it without
+parsing the original tool_call JSON.
+
 ### Environment
 
 Tools receive the standard hook environment (see below) plus:
@@ -359,10 +369,17 @@ timestamp: 2026-03-24T16:05:33-04:00
 call_id: call_abc
 tool: bash
 error: false
+intent: check test suite
 ---
 file1
 file2
 ```
+
+Message bodies are written for humans first: a flat JSON result object
+(e.g. the `bash` tool's `{exit, stdout, stderr, ...}` envelope) is rendered
+as YAML with block scalars for multi-line values, so embedded newlines read
+as real lines instead of `\n` escapes (`plugins/core/lib/render-result`).
+Any other result is stored verbatim.
 
 ### User messages
 

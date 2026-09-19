@@ -18,6 +18,10 @@ case "${1:-}" in
       "timeout": {
         "type": "integer",
         "description": "Timeout in seconds (default 120). On expiry the whole command process group is killed"
+      },
+      "intent": {
+        "type": "string",
+        "description": "Optional. Short phrase describing what this call is trying to accomplish, phrased for a human skimming the transcript. Ignored by the tool itself; UIs show it as the collapsed summary over this call's result."
       }
     },
     "required": ["command"]

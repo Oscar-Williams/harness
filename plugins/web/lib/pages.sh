@@ -491,14 +491,25 @@ _transcript() { # $1 = id
       return t
     }
     BEGIN { printf "<div id=\"transcript\">" }
-    FNR == 1 { sep = 0; role = ""; open = 0; body = "" }
+    FNR == 1 { sep = 0; role = ""; open = 0; body = ""; intent = ""; tool = ""; terr = "" }
     !open && $0 == "---" { sep++; if (sep == 2) open = 1; next }
-    !open && /^role: / { role = substr($0, 7); next }
+    !open && /^role: /    { role = substr($0, 7); next }
+    !open && /^intent: /  { intent = substr($0, 9); next }
+    !open && /^tool: /    { tool = substr($0, 7); next }
+    !open && /^error: /   { terr = substr($0, 8); next }
     !open { next }
     { body = body $0 "\n" }
     ENDFILE {
       if (length(body) > 100000) body = substr(body, 1, 100000)
-      printf "<div class=\"msg %s\"><div class=\"meta\">%s</div><pre>%s</pre></div>", esc(role), esc(role), esc(body)
+      if (role == "tool_result") {
+        # `intent` (optional tool input) is the skim label; fall back to
+        # the tool name. Failed calls stay expanded so errors are visible.
+        sum = intent != "" ? intent : "tool_result" (tool != "" ? ": " tool : "")
+        dopen = terr == "true" ? " open" : ""
+        printf "<details class=\"msg tool_result\"%s><summary>%s</summary><pre>%s</pre></details>", dopen, esc(sum), esc(body)
+      } else {
+        printf "<div class=\"msg %s\"><div class=\"meta\">%s</div><pre>%s</pre></div>", esc(role), esc(role), esc(body)
+      }
     }
     END { print "</div>" }
   ' "${dir}/messages"/*.md

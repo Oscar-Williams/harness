@@ -42,6 +42,10 @@ case "${1:-}" in
           },
           "required": ["type"]
         }
+      },
+      "intent": {
+        "type": "string",
+        "description": "Optional. Short phrase describing what this call is trying to accomplish, phrased for a human skimming the transcript. Ignored by the tool itself; UIs show it as the collapsed summary over this call's result."
       }
     },
     "required": ["path", "edits"]
