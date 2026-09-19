@@ -12,6 +12,8 @@ and this project adheres to Semantic Versioning.
 - Standard optional tool input key `intent`: a short human-readable phrase for what a call is trying to accomplish. Ignored by execution; persisted as `intent:` frontmatter on tool_result messages and rendered as the collapsed summary by the web transcript.
 - Tool result readability: flat JSON results (e.g. the bash envelope) are persisted as YAML with block scalars for multi-line values instead of `\n`-escaped strings (`plugins/core/lib/render-result`); the REPL/stream display uses the same rendering.
 - Web transcript collapses tool_result messages into `<details>` blocks labeled by `intent` (falling back to the tool name); failed calls stay expanded.
+- Assistant messages render as segments: thinking blocks and tool calls collapse into `<details>`; call summaries use `intent` (falling back to command/path/prompt) with flat-JSON inputs rendered as YAML like results.
+- Every transcript message shows its timestamp.
 
 ### Changed
 

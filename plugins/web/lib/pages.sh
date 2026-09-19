@@ -19,6 +19,10 @@ body{font:14px/1.5 system-ui,sans-serif;max-width:48rem;margin:0 auto;padding:0 
 .user{background:#f0f7ff}.assistant{background:#fafafa}
 .msg pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:.25rem 0;font:inherit}
 .meta{color:#888;font-size:.8rem}
+.msg>summary{cursor:pointer;color:#666;font-size:.9rem}
+.seg{margin:.35rem 0}
+.seg>summary{cursor:pointer;color:#888;font-size:.8rem}
+.seg pre{margin:.15rem 0 .15rem .5rem}
 form{display:flex;gap:.5rem;margin:0;padding:1rem 0;background:inherit;position:sticky;bottom:0}
 input[type=text],textarea{flex:1;min-width:0;padding:.5rem;border:1px solid #ccc;border-radius:4px;font:inherit}
 button{padding:.5rem 1rem}
@@ -483,6 +487,10 @@ _transcript() { # $1 = id
     printf '<div id="transcript"><p class="meta">(no messages yet)</p></div>'
     return
   }
+  # One pass: frontmatter (role/timestamp/intent/tool/error) then body.
+  # Assistant bodies split into segments — ```thinking and ```tool_call
+  # fences render as collapsed <details>; tool_call input gets the same
+  # flat-JSON→YAML treatment as results (see lib/render-result).
   awk '
     function esc(s, t) {
       t = s
@@ -490,25 +498,136 @@ _transcript() { # $1 = id
       gsub(/>/, "\\&gt;", t);  gsub(/"/, "\\&quot;", t)
       return t
     }
+    function tsfmt(iso, r) { r = substr(iso, 6, 14); gsub(/T/, " ", r); return r }
+
+    # --- flat JSON -> YAML (mirrors plugins/core/lib/render-result) ---
+    function junes(s, t) {
+      t = s
+      gsub(/\\\\/, "\x01", t)
+      gsub(/\\n/, "\n", t); gsub(/\\t/, "\t", t)
+      gsub(/\\"/, "\"", t); gsub(/\\\//, "/", t)
+      gsub(/\x01/, "\\", t)
+      return t
+    }
+    function jquote(s, p, c) { # s starts at opening quote; return its index of close
+      p = 2
+      while (p <= length(s)) {
+        c = substr(s, p, 1)
+        if (c == "\\") p += 2
+        else if (c == "\"") return p
+        else p++
+      }
+      return 0
+    }
+    function yscalar(v, out, i, n, L) { # v = raw JSON string source, quotes stripped
+      if (index(v, "\\n") == 0) {
+        if (v != "" && v !~ /[\\"]|#/ && v !~ /^[ \t]/ && v !~ /[ \t]$/)
+          return junes(v)
+        return "\"" v "\""   # JSON escaping is valid YAML double-quoted
+      }
+      v = junes(v); sub(/\n$/, "", v)
+      n = split(v, L, "\n"); out = "|"
+      for (i = 1; i <= n; i++) out = out "\n  " L[i]
+      return out
+    }
+    function json2yaml(j, rest, key, p, c, v, out) {
+      if (j !~ /^[ \t]*\{/) return ""
+      rest = j; sub(/^[ \t]*\{/, "", rest); sub(/\}[ \t]*$/, "", rest)
+      while (rest != "") {
+        if (substr(rest, 1, 1) == ",") { rest = substr(rest, 2); continue }
+        if (substr(rest, 1, 1) != "\"") return ""
+        p = jquote(rest); if (!p) return ""
+        key = substr(rest, 2, p - 2)
+        rest = substr(rest, p + 1)
+        if (substr(rest, 1, 1) != ":") return ""
+        rest = substr(rest, 2); sub(/^[ \t]*/, "", rest)
+        c = substr(rest, 1, 1)
+        if (c == "\"") {
+          p = jquote(rest); if (!p) return ""
+          v = substr(rest, 2, p - 2); rest = substr(rest, p + 1)
+          out = out key ": " yscalar(v) "\n"
+          if (key == "intent" || key == "command" || key == "path" || key == "prompt")
+            vm[key] = junes(v)
+        } else if (c == "[" || c == "{") {
+          return ""   # not flat: caller shows raw JSON
+        } else {
+          match(rest, /^[^,]*/)
+          out = out key ": " substr(rest, 1, RLENGTH) "\n"
+          rest = substr(rest, RLENGTH + 1)
+        }
+      }
+      return out
+    }
+
+    # --- assistant segment emission (buffered; wrapper printed at ENDFILE) ---
+    function flushtext() {
+      if (textbuf ~ /[^ \t\n]/)
+        html = html "<div class=\"seg text\"><pre>" esc(textbuf) "</pre></div>\n"
+      textbuf = ""
+    }
+    function flushseg( lbl, y2, LL) {
+      if (seg == "think") {
+        html = html "<details class=\"seg think\"><summary>thinking</summary><pre>" esc(buf) "</pre></details>\n"
+      } else if (seg == "call") {
+        y2 = json2yaml(cbuf); if (y2 == "") y2 = cbuf
+        lbl = vm["intent"]
+        if (lbl == "") lbl = vm["command"]
+        if (lbl == "") lbl = vm["path"]
+        if (lbl == "") lbl = vm["prompt"]
+        if (lbl != "") {
+          split(lbl, LL, "\n"); lbl = LL[1]
+          if (length(lbl) > 60) lbl = substr(lbl, 1, 57) "..."
+          lbl = " · " lbl
+        }
+        html = html "<details class=\"seg call\"><summary>" esc(cname lbl) "</summary><pre>" esc(y2) "</pre></details>\n"
+      }
+      seg = ""; buf = ""; cbuf = ""
+    }
+
     BEGIN { printf "<div id=\"transcript\">" }
-    FNR == 1 { sep = 0; role = ""; open = 0; body = ""; intent = ""; tool = ""; terr = "" }
+    FNR == 1 {
+      sep = 0; role = ""; open = 0; body = ""
+      ts = ""; intent = ""; tool = ""; terr = ""
+      seg = ""; buf = ""; cbuf = ""; cname = ""; textbuf = ""; html = ""
+      split("", vm)
+    }
     !open && $0 == "---" { sep++; if (sep == 2) open = 1; next }
-    !open && /^role: /    { role = substr($0, 7); next }
-    !open && /^intent: /  { intent = substr($0, 9); next }
-    !open && /^tool: /    { tool = substr($0, 7); next }
-    !open && /^error: /   { terr = substr($0, 8); next }
+    !open && /^role: /      { role = substr($0, 7); next }
+    !open && /^timestamp: / { ts = substr($0, 12); next }
+    !open && /^intent: /    { intent = substr($0, 9); next }
+    !open && /^tool: /      { tool = substr($0, 7); next }
+    !open && /^error: /     { terr = substr($0, 8); next }
     !open { next }
+    role == "assistant" {
+      if (seg == "think" || seg == "call") {
+        if ($0 == "```") flushseg()
+        else if (seg == "think") buf = buf $0 "\n"
+        else cbuf = (cbuf == "" ? $0 : cbuf "\n" $0)
+      } else if ($0 ~ /^```thinking/) {
+        flushtext(); seg = "think"; buf = ""
+      } else if ($0 ~ /^```tool_call /) {
+        flushtext(); seg = "call"; cbuf = ""; cname = ""; split("", vm)
+        if (match($0, /name=[^ ]+/)) cname = substr($0, RSTART + 5, RLENGTH - 5)
+      } else {
+        textbuf = textbuf $0 "\n"
+      }
+      next
+    }
     { body = body $0 "\n" }
     ENDFILE {
+      if (open) {
       if (length(body) > 100000) body = substr(body, 1, 100000)
-      if (role == "tool_result") {
-        # `intent` (optional tool input) is the skim label; fall back to
-        # the tool name. Failed calls stay expanded so errors are visible.
-        sum = intent != "" ? intent : "tool_result" (tool != "" ? ": " tool : "")
+      if (role == "assistant") {
+        flushtext(); flushseg()
+        printf "<div class=\"msg assistant\"><div class=\"meta\">assistant · %s</div>\n%s</div>", esc(tsfmt(ts)), html
+      } else if (role == "tool_result") {
+        # intent labels the collapsed result; failures stay expanded
+        sum = intent != "" ? intent : (tool != "" ? tool : "tool_result")
         dopen = terr == "true" ? " open" : ""
-        printf "<details class=\"msg tool_result\"%s><summary>%s</summary><pre>%s</pre></details>", dopen, esc(sum), esc(body)
+        printf "<details class=\"msg tool_result\"%s><summary>%s · %s</summary><pre>%s</pre></details>", dopen, esc(sum), esc(tsfmt(ts)), esc(body)
       } else {
-        printf "<div class=\"msg %s\"><div class=\"meta\">%s</div><pre>%s</pre></div>", esc(role), esc(role), esc(body)
+        printf "<div class=\"msg %s\"><div class=\"meta\">%s · %s</div><pre>%s</pre></div>", esc(role), esc(role), esc(tsfmt(ts)), esc(body)
+      }
       }
     }
     END { print "</div>" }
