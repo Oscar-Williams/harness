@@ -69,6 +69,7 @@ _display+=$'\n'
 # as YAML so embedded newlines read as real lines, not \n escapes.
 _lib="$(dirname "$(readlink -f "$0")")/../../lib"
 _disp="$(printf '%s' "${result}" | "${_lib}/render-result" 2>/dev/null || printf '%s' "${result}")"
+[[ -n "${_disp}" || -z "${result}" ]] || _disp="${result}"   # renderer failure guard
 total_lines="$(printf '%s' "${_disp}" | wc -l | tr -d ' ')"
 if (( total_lines > 30 )); then
   _display+="$(head -30 <<< "${_disp}" | sed 's/^/  /')"

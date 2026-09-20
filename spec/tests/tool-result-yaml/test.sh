@@ -33,3 +33,10 @@ assert_contains "verbatim text" "$msg2" '^just text, not json$'
 input="$(jq -c -n --arg r '{"nested":{"a":1}}' '{call_id:"c3",name:"agent",input:{},result:$r,error:false,tool_calls:[]}')"
 echo "${input}" | "$hook" >/dev/null
 assert_contains "nested verbatim" "${HARNESS_SESSION}/messages/0003-tool_result.md" '^{"nested":{"a":1}}$'
+# 4. pretty-printed (multi-line) JSON result renders too.
+pretty="$(printf '%s' '{"exit":0,"stdout":"x\ny\n"}' | jq .)"
+input="$(jq -c -n --arg r "$pretty" '{call_id:"c4",name:"bash",input:{},result:$r,error:false,tool_calls:[]}')"
+echo "${input}" | "$hook" >/dev/null
+msg4="${HARNESS_SESSION}/messages/0004-tool_result.md"
+assert_contains "pretty stdout block" "$msg4" '^stdout: |$'
+assert_contains "pretty stdout line" "$msg4" '^  x$'

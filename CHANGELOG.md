@@ -14,8 +14,11 @@ and this project adheres to Semantic Versioning.
 - Web transcript collapses tool_result messages into `<details>` blocks labeled by `intent` (falling back to the tool name); failed calls stay expanded.
 - Assistant messages render as segments: thinking blocks and tool calls collapse into `<details>`; call summaries use `intent` (falling back to command/path/prompt) with flat-JSON inputs rendered as YAML like results.
 - Every transcript message shows its timestamp.
+- Session titles on the home page list (same title-or-id logic as the sidebar).
 
 ### Changed
+
+- Single flat-JSON→YAML implementation (`plugins/core/lib/yaml.awk`, awk) shared by tool-result persistence and the web transcript; `render-result` is a thin driver over it. Hooks guard against a renderer failing silently (exit 0, empty output) by falling back to the raw result.
 
 ### Fixed
 

@@ -27,6 +27,7 @@ intent="$(echo "${data}" | jq -r '.input.intent // empty')"
 # Flat JSON results render as YAML for readable transcripts; others verbatim.
 _lib="$(dirname "$(readlink -f "$0")")/../../lib"
 rendered="$(printf '%s' "${result}" | "${_lib}/render-result" 2>/dev/null || printf '%s' "${result}")"
+[[ -n "${rendered}" || -z "${result}" ]] || rendered="${result}"   # renderer failure guard
 
 {
   cat <<EOF

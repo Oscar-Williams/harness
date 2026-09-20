@@ -280,7 +280,7 @@ handle_home() {
   local id rows=""
   while IFS= read -r id; do
     [[ -d "${HARNESS_SESSIONS}/${id}" ]] || continue
-    rows+="<li><a href=\"/s/$(html_escape "$id")\">$(html_escape "$id")</a></li>"
+    rows+="<li><a href=\"/s/$(html_escape "$id")\">$(_sb_label "$id")</a></li>"
   done < <(_session_order)
   HEADERS+=("Content-Type: text/html; charset=utf-8")
   BODY="$(_head "harness" <<EOF
@@ -491,7 +491,8 @@ _transcript() { # $1 = id
   # Assistant bodies split into segments — ```thinking and ```tool_call
   # fences render as collapsed <details>; tool_call input gets the same
   # flat-JSON→YAML treatment as results (see lib/render-result).
-  awk '
+  # flat-JSON->YAML helpers are shared with core (lib/render-result)
+  awk -f "${HARNESS_ROOT}/plugins/core/lib/yaml.awk" -e '
     function esc(s, t) {
       t = s
       gsub(/&/, "\\&amp;", t); gsub(/</, "\\&lt;", t)
@@ -499,65 +500,6 @@ _transcript() { # $1 = id
       return t
     }
     function tsfmt(iso, r) { r = substr(iso, 6, 14); gsub(/T/, " ", r); return r }
-
-    # --- flat JSON -> YAML (mirrors plugins/core/lib/render-result) ---
-    function junes(s, t) {
-      t = s
-      gsub(/\\\\/, "\x01", t)
-      gsub(/\\n/, "\n", t); gsub(/\\t/, "\t", t)
-      gsub(/\\"/, "\"", t); gsub(/\\\//, "/", t)
-      gsub(/\x01/, "\\", t)
-      return t
-    }
-    function jquote(s, p, c) { # s starts at opening quote; return its index of close
-      p = 2
-      while (p <= length(s)) {
-        c = substr(s, p, 1)
-        if (c == "\\") p += 2
-        else if (c == "\"") return p
-        else p++
-      }
-      return 0
-    }
-    function yscalar(v, out, i, n, L) { # v = raw JSON string source, quotes stripped
-      if (index(v, "\\n") == 0) {
-        if (v != "" && v !~ /[\\"]|#/ && v !~ /^[ \t]/ && v !~ /[ \t]$/)
-          return junes(v)
-        return "\"" v "\""   # JSON escaping is valid YAML double-quoted
-      }
-      v = junes(v); sub(/\n$/, "", v)
-      n = split(v, L, "\n"); out = "|"
-      for (i = 1; i <= n; i++) out = out "\n  " L[i]
-      return out
-    }
-    function json2yaml(j, rest, key, p, c, v, out) {
-      if (j !~ /^[ \t]*\{/) return ""
-      rest = j; sub(/^[ \t]*\{/, "", rest); sub(/\}[ \t]*$/, "", rest)
-      while (rest != "") {
-        if (substr(rest, 1, 1) == ",") { rest = substr(rest, 2); continue }
-        if (substr(rest, 1, 1) != "\"") return ""
-        p = jquote(rest); if (!p) return ""
-        key = substr(rest, 2, p - 2)
-        rest = substr(rest, p + 1)
-        if (substr(rest, 1, 1) != ":") return ""
-        rest = substr(rest, 2); sub(/^[ \t]*/, "", rest)
-        c = substr(rest, 1, 1)
-        if (c == "\"") {
-          p = jquote(rest); if (!p) return ""
-          v = substr(rest, 2, p - 2); rest = substr(rest, p + 1)
-          out = out key ": " yscalar(v) "\n"
-          if (key == "intent" || key == "command" || key == "path" || key == "prompt")
-            vm[key] = junes(v)
-        } else if (c == "[" || c == "{") {
-          return ""   # not flat: caller shows raw JSON
-        } else {
-          match(rest, /^[^,]*/)
-          out = out key ": " substr(rest, 1, RLENGTH) "\n"
-          rest = substr(rest, RLENGTH + 1)
-        }
-      }
-      return out
-    }
 
     # --- assistant segment emission (buffered; wrapper printed at ENDFILE) ---
     function flushtext() {
