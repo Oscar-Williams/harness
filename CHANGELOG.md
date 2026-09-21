@@ -18,6 +18,9 @@ and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- Transcript updates are per-message deltas (stable `m<seq>` ids on every message div) — a new message costs its own bytes, `.stream` churn renders nothing; `stop`/`done` stream events force a full re-sync as the drift safety net, as do mid-inserted or removed files.
+- Thinking streams live: `thinking` deltas from the session stream render as an open block in a `#live` region during the turn; the saved message's collapsed render supersedes it.
+
 - Transcript patches transmit only when the rendered HTML actually changes (render → hash → compare): `.stream` churn during live turns no longer re-sends megabyte transcripts.
 
 - Single flat-JSON→YAML implementation (`plugins/core/lib/yaml.awk`, awk) shared by tool-result persistence and the web transcript; `render-result` is a thin driver over it. Hooks guard against a renderer failing silently (exit 0, empty output) by falling back to the raw result.

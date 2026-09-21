@@ -321,7 +321,7 @@ handle_session() { # $1 = id
 handle_events() { # $1 = id
   local dir="${HARNESS_SESSIONS}/$1" ui_sig ui_last="" fifo line beat=0 st_last="" ti_last=""
   local msg_cur="" msg_last="" changed removed max_old full f
-  local ssz stream_off=0 force_full=false ev
+  local ssz stream_off=0 force_full=false ev live_buf="" live_last=""
   [[ -d "${dir}" ]] || { handle_404; return; }
   respond_sse
   sse_patch '<div id="hb" hidden></div>' # initial beat so the watchdog arms immediately
@@ -367,6 +367,8 @@ handle_events() { # $1 = id
           sse_patch "$(printf '<div id="transcript">'; _msgrender ${changed}; printf '</div>')" || exit 0
         fi
       fi
+      # the message's own render supersedes any live streaming block
+      [[ -n "${live_buf}" ]] && live_buf=""
       # Message changes move the conversation — re-assert status in the same
       # moment instead of waiting for the next beat.
       st_last="$(_status_fragment "$1")"
@@ -378,14 +380,28 @@ handle_events() { # $1 = id
     # path trusts stat comparison and morph merging; a periodic full
     # transcript re-asserts the DOM against any drift.
     ssz="$(stat -c %s "${dir}/.stream" 2>/dev/null || echo 0)"
-    (( ssz < stream_off )) && stream_off=0   # truncated: a new turn began
+    if (( ssz < stream_off )); then          # truncated: a new turn began
+      stream_off=0
+      live_buf="" live_last=""
+    fi
     if (( ssz > stream_off )); then
       while IFS= read -r ev; do
         case "$(printf '%s' "${ev}" | jq -r '.type // empty' 2>/dev/null)" in
-          stop|done) force_full=true ;;
+          thinking) live_buf+="$(printf '%s' "${ev}" | jq -r '.text // empty')" ;;
+          stop|done) force_full=true; live_buf="" ;;
         esac
       done < <(tail -c +$(( stream_off + 1 )) "${dir}/.stream" 2>/dev/null)
       stream_off="${ssz}"
+    fi
+    # live thinking stream: show deltas as an open block while the turn is
+    # running; the saved message's collapsed render supersedes it
+    if [[ "${live_buf}" != "${live_last}" ]]; then
+      if [[ -n "${live_buf}" ]]; then
+        sse_patch "$(printf '<div id="live"><details class="seg think" open><summary>thinking…</summary><pre>%s</pre></details></div>' "$(html_escape "${live_buf}")")" || exit 0
+      else
+        sse_patch '<div id="live"></div>' || exit 0
+      fi
+      live_last="${live_buf}"
     fi
     if [[ "${force_full}" == true ]]; then
       sse_patch "$(_transcript "$1")" || exit 0
@@ -509,6 +525,7 @@ $(_agent_status_html "${id}")
 <div id="view" data-init="@get('/s/$(html_escape "${id}")/events', {retry: 'always', retryMaxCount: 99999, openWhenHidden: true})">
 <div id="scroll">
 $(_transcript "$1")
+<div id="live"></div>
 </div>
 </div>
 <button id="scrollbtn" hidden title="scroll to bottom">↓</button>
