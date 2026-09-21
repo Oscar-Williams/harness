@@ -319,7 +319,7 @@ handle_session() { # $1 = id
 # Each connection gets its own fifo under .ui/ so sends can fan out over
 # the whole directory; fifos are removed when the client disconnects.
 handle_events() { # $1 = id
-  local dir="${HARNESS_SESSIONS}/$1" sig last="" ui_sig ui_last="" fifo line beat=0 st_last="" ti_last=""
+  local dir="${HARNESS_SESSIONS}/$1" sig last="" ui_sig ui_last="" fifo line beat=0 st_last="" ti_last="" th_last="" html th
   [[ -d "${dir}" ]] || { handle_404; return; }
   respond_sse
   sse_patch '<div id="hb" hidden></div>' # initial beat so the watchdog arms immediately
@@ -336,7 +336,16 @@ handle_events() { # $1 = id
     fi
     sig="$(_dir_sig "${dir}")"
     if [[ "${sig}" != "${last}" ]]; then
-      sse_patch "$(_transcript "$1")" || exit 0
+      # Render, then hash: .stream churn re-renders byte-identical HTML
+      # constantly during a live turn — transmit only when the rendered
+      # transcript actually changed. Any content-affecting change (messages,
+      # titles, rendering itself) still lands immediately.
+      html="$(_transcript "$1")"
+      th="$(printf '%s' "${html}" | md5sum | cut -d" " -f1)"
+      if [[ "${th}" != "${th_last}" ]]; then
+        sse_patch "${html}" || exit 0
+        th_last="${th}"
+      fi
       # Turn end changes the transcript — re-assert status in the same
       # moment instead of relying on the next change-detect beat.
       st_last="$(_status_fragment "$1")"
