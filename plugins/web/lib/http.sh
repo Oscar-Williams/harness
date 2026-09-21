@@ -18,6 +18,9 @@ respond_request() {
   # Session pages are dynamic per-request; without this, mobile browsers
   # can serve stale copies from heuristic cache during reconnects.
   header Cache-Control "no-store"
+  # Explicit framing (bytes, not chars: transcripts carry UTF-8) so proxies
+  # never have to buffer close-delimited responses.
+  header Content-Length "$(printf '%s' "$BODY" | wc -c)"
   header Connection close
   end_headers
   printf '%s' "$BODY"
@@ -36,6 +39,7 @@ respond_sse() {
   respond 200 OK
   header Content-Type "text/event-stream"
   header Cache-Control no-cache
+  header X-Accel-Buffering no
   header Connection close
   end_headers
 }
