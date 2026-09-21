@@ -319,7 +319,9 @@ handle_session() { # $1 = id
 # Each connection gets its own fifo under .ui/ so sends can fan out over
 # the whole directory; fifos are removed when the client disconnects.
 handle_events() { # $1 = id
-  local dir="${HARNESS_SESSIONS}/$1" sig last="" ui_sig ui_last="" fifo line beat=0 st_last="" ti_last="" th_last="" html th
+  local dir="${HARNESS_SESSIONS}/$1" ui_sig ui_last="" fifo line beat=0 st_last="" ti_last=""
+  local msg_cur="" msg_last="" changed removed max_old full f
+  local ssz stream_off=0 force_full=false ev
   [[ -d "${dir}" ]] || { handle_404; return; }
   respond_sse
   sse_patch '<div id="hb" hidden></div>' # initial beat so the watchdog arms immediately
@@ -334,23 +336,60 @@ handle_events() { # $1 = id
       [[ -n "${line}" ]] && { sse_patch "${line}" append || exit 0; }
       continue
     fi
-    sig="$(_dir_sig "${dir}")"
-    if [[ "${sig}" != "${last}" ]]; then
-      # Render, then hash: .stream churn re-renders byte-identical HTML
-      # constantly during a live turn — transmit only when the rendered
-      # transcript actually changed. Any content-affecting change (messages,
-      # titles, rendering itself) still lands immediately.
-      html="$(_transcript "$1")"
-      th="$(printf '%s' "${html}" | md5sum | cut -d" " -f1)"
-      if [[ "${th}" != "${th_last}" ]]; then
-        sse_patch "${html}" || exit 0
-        th_last="${th}"
+    # --- transcript deltas: per-message-file change detection ---
+    # A changed message renders as its own <div id="mXXXX"> fragment; the
+    # morph merges it in place, so a new message costs its own bytes instead
+    # of a full transcript. .stream churn no longer triggers renders.
+    msg_cur="$(stat -c '%n %Y %s' "${dir}"/messages/*.md 2>/dev/null | sort)"
+    if [[ "${msg_cur}" != "${msg_last}" ]]; then
+      if [[ -z "${msg_last}" ]]; then
+        sse_patch "$(_transcript "$1")" || exit 0
+      else
+        changed="$(comm -13 <(printf '%s\n' "${msg_last}") <(printf '%s\n' "${msg_cur}") | awk '{print $1}')"
+        removed="$(comm -23 <(printf '%s\n' "${msg_last}" | awk '{print $1}') <(printf '%s\n' "${msg_cur}" | awk '{print $1}') | wc -l)"
+        max_old="$(printf '%s\n' "${msg_last}" | awk '{print $1}' | tail -1)"
+        full=false
+        (( removed > 0 )) && full=true
+        if [[ "${full}" == false ]]; then
+          # a NEW file sorting before the current tail is a mid-insert;
+          # morph positioning cannot be trusted for that — send everything
+          while IFS= read -r f; do
+            [[ -z "${f}" ]] && continue
+            if [[ "${f}" < "${max_old}" ]] \
+               && ! printf '%s\n' "${msg_last}" | awk '{print $1}' | grep -qxF "${f}"; then
+              full=true; break
+            fi
+          done <<< "${changed}"
+        fi
+        if [[ "${full}" == true ]]; then
+          sse_patch "$(_transcript "$1")" || exit 0
+        else
+          sse_patch "$(printf '<div id="transcript">'; _msgrender ${changed}; printf '</div>')" || exit 0
+        fi
       fi
-      # Turn end changes the transcript — re-assert status in the same
-      # moment instead of relying on the next change-detect beat.
+      # Message changes move the conversation — re-assert status in the same
+      # moment instead of waiting for the next beat.
       st_last="$(_status_fragment "$1")"
       sse_patch "${st_last}" || exit 0
-      last="${sig}"
+      msg_last="${msg_cur}"
+    fi
+
+    # --- .stream tail: turn boundaries force a full re-sync. The delta
+    # path trusts stat comparison and morph merging; a periodic full
+    # transcript re-asserts the DOM against any drift.
+    ssz="$(stat -c %s "${dir}/.stream" 2>/dev/null || echo 0)"
+    (( ssz < stream_off )) && stream_off=0   # truncated: a new turn began
+    if (( ssz > stream_off )); then
+      while IFS= read -r ev; do
+        case "$(printf '%s' "${ev}" | jq -r '.type // empty' 2>/dev/null)" in
+          stop|done) force_full=true ;;
+        esac
+      done < <(tail -c +$(( stream_off + 1 )) "${dir}/.stream" 2>/dev/null)
+      stream_off="${ssz}"
+    fi
+    if [[ "${force_full}" == true ]]; then
+      sse_patch "$(_transcript "$1")" || exit 0
+      force_full=false
     fi
     if (( beat % 4 == 0 )); then # every ~2s: spinners + sidebar titles
       local st ti
@@ -520,17 +559,12 @@ EOF
 }
 
 # One awk pass over all message files — no per-message subprocess forks.
-_transcript() { # $1 = id
-  local dir="${HARNESS_SESSIONS}/$1"
-  ls "${dir}/messages"/*.md >/dev/null 2>&1 || {
-    printf '<div id="transcript"><p class="meta">(no messages yet)</p></div>'
-    return
-  }
+_msgrender() { # $@ = message files -> rendered divs (no #transcript wrapper)
   # One pass: frontmatter (role/timestamp/intent/tool/error) then body.
-  # Assistant bodies split into segments — ```thinking and ```tool_call
-  # fences render as collapsed <details>; tool_call input gets the same
-  # flat-JSON→YAML treatment as results (see lib/render-result).
-  # flat-JSON->YAML helpers are shared with core (lib/render-result)
+  # Assistant bodies split into segments — thinking/tool_call fences
+  # (growing fences; see receive/10-save) render as collapsed <details>;
+  # tool_call input gets the same flat-JSON→YAML treatment as results.
+  # flat-JSON->YAML helpers shared with core (lib/render-result).
   awk -f "${HARNESS_ROOT}/plugins/core/lib/yaml.awk" -e '
     function esc(s, t) {
       t = s
@@ -571,7 +605,6 @@ _transcript() { # $1 = id
       seg = ""; buf = ""; cbuf = ""
     }
 
-    BEGIN { printf "<div id=\"transcript\">" }
     FNR == 1 {
       sep = 0; role = ""; open = 0; body = ""
       ts = ""; intent = ""; tool = ""; terr = ""
@@ -608,19 +641,29 @@ _transcript() { # $1 = id
       if (length(body) > 100000) body = substr(body, 1, 100000)
       if (role == "assistant") {
         flushtext(); flushseg()
-        printf "<div class=\"msg assistant\"><div class=\"meta\">assistant · %s</div>\n%s</div>", esc(tsfmt(ts)), html
+        printf "<div class=\"msg assistant\" id=\"m%s\"><div class=\"meta\">assistant · %s</div>\n%s</div>", seq, esc(tsfmt(ts)), html
       } else if (role == "tool_result") {
         # intent labels the collapsed result; failures stay expanded
         sum = intent != "" ? intent : (tool != "" ? tool : "tool_result")
         dopen = terr == "true" ? " open" : ""
         printf "<details class=\"msg tool_result\" id=\"m%s\"%s><summary>%s · %s</summary><pre>%s</pre></details>", seq, dopen, esc(sum), esc(tsfmt(ts)), esc(body)
       } else {
-        printf "<div class=\"msg %s\"><div class=\"meta\">%s · %s</div><pre>%s</pre></div>", esc(role), esc(role), esc(tsfmt(ts)), esc(body)
+        printf "<div class=\"msg %s\" id=\"m%s\"><div class=\"meta\">%s · %s</div><pre>%s</pre></div>", esc(role), seq, esc(role), esc(tsfmt(ts)), esc(body)
       }
       }
     }
-    END { print "</div>" }
-  ' "${dir}/messages"/*.md
+  ' "$@"
+}
+
+_transcript() { # $1 = id
+  local dir="${HARNESS_SESSIONS}/$1"
+  ls "${dir}/messages"/*.md >/dev/null 2>&1 || {
+    printf '<div id="transcript"><p class="meta">(no messages yet)</p></div>'
+    return
+  }
+  printf '<div id="transcript">'
+  _msgrender "${dir}"/messages/*.md
+  printf '</div>\n'
 }
 
 _dir_sig() { # fingerprint of a session dir: any file change (size or mtime)
