@@ -47,7 +47,12 @@ sse_patch() { # $1 = fragment html, $2 = "append" to add new elements (default m
   if [[ "${2:-}" == "append" ]]; then
     { printf 'data: selector body\ndata: mode append\n'; } 2>/dev/null || return 1
   fi
+    # SSE treats a lone CR as a line terminator, so a CR inside a fragment
+    # line would split the event mid-HTML and corrupt the client-side morph
+    # (message bodies from CRLF-bearing tool results). Strip CRs at this
+    # boundary; they are invisible in rendered HTML anyway.
   while IFS= read -r line || [[ -n "${line}" ]]; do
+      line="${line//$'\r'/}"
     { printf 'data: elements %s\n' "${line}"; } 2>/dev/null || return 1
   done < <(printf '%s' "$1" 2>/dev/null)
   { printf '\n'; } 2>/dev/null || return 1

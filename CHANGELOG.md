@@ -22,6 +22,8 @@ and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Live transcript truncation after page load: `\r` inside message bodies (CRLF-bearing tool results) split SSE `data:` lines mid-HTML per the SSE spec, so client-side morphs applied truncated transcripts and everything after the first CR vanished. `sse_patch` now strips CRs at the transport boundary.
+
 
 ### Removed
 
