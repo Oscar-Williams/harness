@@ -60,6 +60,10 @@ for f in $(ls -1 "${msg_dir}"/*.md 2>/dev/null | sort); do
       in_thinking_block=false
       tool_id="" tool_name="" tool_body=""
       thinking_sig="" thinking_text=""
+      # Fences grow to one past any leading-backtick run inside the block
+      # (see receive/10-save), so embedded ``` in thinking cannot terminate
+      # a block early. Close only on the exact opening length.
+      think_fence='```' call_fence='```'
 
       _flush_text() {
         if [[ -n "${current_text}" ]]; then
@@ -74,14 +78,15 @@ for f in $(ls -1 "${msg_dir}"/*.md 2>/dev/null | sort); do
       }
 
       while IFS= read -r line; do
-        if [[ "${line}" =~ ^\`\`\`thinking\ signature=(.+) ]]; then
+        if [[ "${line}" =~ ^(\`+)thinking\ signature=(.+) ]]; then
           _flush_text
           in_thinking_block=true
-          thinking_sig="${BASH_REMATCH[1]}"
+          think_fence="${BASH_REMATCH[1]}"
+          thinking_sig="${BASH_REMATCH[2]}"
           thinking_text=""
           continue
         fi
-        if ${in_thinking_block} && [[ "${line}" == '```' ]]; then
+        if ${in_thinking_block} && [[ "${line}" == "${think_fence}" ]]; then
           in_thinking_block=false
           thinking_text="${thinking_text%$'\n'}"
           content_blocks="$(printf '%s\n%s\n%s' "${content_blocks}" \
@@ -90,15 +95,16 @@ for f in $(ls -1 "${msg_dir}"/*.md 2>/dev/null | sort); do
             | jq -s '.[0] + [{type: "thinking", thinking: .[1], signature: .[2]}]')"
           continue
         fi
-        if [[ ( "${_stop}" == "tool_calls" || -z "${_stop}" ) && "${line}" =~ ^\`\`\`tool_call\ id=([^ ]+)\ name=([^ ]+) ]]; then
+        if [[ ( "${_stop}" == "tool_calls" || -z "${_stop}" ) && "${line}" =~ ^(\`+)tool_call\ id=([^ ]+)\ name=([^ ]+) ]]; then
           _flush_text
           in_tool_block=true
-          tool_id="${BASH_REMATCH[1]}"
-          tool_name="${BASH_REMATCH[2]}"
+          call_fence="${BASH_REMATCH[1]}"
+          tool_id="${BASH_REMATCH[2]}"
+          tool_name="${BASH_REMATCH[3]}"
           tool_body=""
           continue
         fi
-        if ${in_tool_block} && [[ "${line}" == '```' ]]; then
+        if ${in_tool_block} && [[ "${line}" == "${call_fence}" ]]; then
           in_tool_block=false
           content_blocks="$(printf '%s\n%s' "${content_blocks}" "${tool_body}" \
             | jq -s --arg id "${tool_id}" --arg name "${tool_name}" \

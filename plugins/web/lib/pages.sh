@@ -540,6 +540,10 @@ _transcript() { # $1 = id
     }
     function tsfmt(iso, r) { r = substr(iso, 6, 14); gsub(/T/, " ", r); return r }
 
+    # Fences grow past any backtick run inside a block (see receive/10-save):
+    # close a segment only on the exact opening fence length.
+    function mkfence(n, s, i) { s = ""; for (i = 0; i < n; i++) s = s "`"; return s }
+
     # --- assistant segment emission (buffered; wrapper printed at ENDFILE) ---
     function flushtext() {
       if (textbuf ~ /[^ \t\n]/)
@@ -571,7 +575,7 @@ _transcript() { # $1 = id
     FNR == 1 {
       sep = 0; role = ""; open = 0; body = ""
       ts = ""; intent = ""; tool = ""; terr = ""
-      seg = ""; buf = ""; cbuf = ""; cname = ""; textbuf = ""; html = ""; segk = 0
+      seg = ""; buf = ""; cbuf = ""; cname = ""; textbuf = ""; html = ""; segk = 0; segf = 3
       split("", vm)
     }
     !open && $0 == "---" { sep++; if (sep == 2) open = 1; next }
@@ -584,12 +588,13 @@ _transcript() { # $1 = id
     !open { next }
     role == "assistant" {
       if (seg == "think" || seg == "call") {
-        if ($0 == "```") flushseg()
+        if ($0 == mkfence(segf)) flushseg()
         else if (seg == "think") buf = buf $0 "\n"
         else cbuf = (cbuf == "" ? $0 : cbuf "\n" $0)
-      } else if ($0 ~ /^```thinking/) {
-        flushtext(); seg = "think"; buf = ""
-      } else if ($0 ~ /^```tool_call /) {
+      } else if (match($0, /^(`+)thinking/)) {
+        flushtext(); seg = "think"; segf = RLENGTH - 8; buf = ""
+      } else if (match($0, /^(`+)tool_call /)) {
+        segf = RLENGTH - 10
         flushtext(); seg = "call"; cbuf = ""; cname = ""; split("", vm)
         if (match($0, /name=[^ ]+/)) cname = substr($0, RSTART + 5, RLENGTH - 5)
       } else {
