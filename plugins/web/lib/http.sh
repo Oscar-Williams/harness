@@ -15,6 +15,9 @@ respond_request() {
   respond "$STATUS" "$(_status_reason "$STATUS")"
   local h
   for h in "${HEADERS[@]}"; do printf '%s\r\n' "$h"; done
+  # Session pages are dynamic per-request; without this, mobile browsers
+  # can serve stale copies from heuristic cache during reconnects.
+  header Cache-Control "no-store"
   header Connection close
   end_headers
   printf '%s' "$BODY"
