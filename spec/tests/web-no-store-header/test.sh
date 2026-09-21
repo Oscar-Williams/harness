@@ -10,7 +10,8 @@ STATUS=200
 HEADERS=("Content-Type: text/html; charset=utf-8")
 BODY="<html>dynamic session content</html>"
 out="$(respond_request)"
-printf '%s' "${out}" | grep -qi $'Cache-Control: no-store' \
+printf '%s' "${out}" | grep -qi $'Cache-Control: no-store
+' \
   || { echo "FAIL: no-store missing"; printf '%s' "${out}" | od -c | head -5; exit 1; }
 # framing still intact: body delivered after blank line
 echo "${out}" | grep -qF '<html>dynamic session content</html>' || { echo "FAIL: body mangled"; exit 1; }
@@ -26,3 +27,25 @@ cl="$(printf '%s' "${out}" | sed -n 's/^Content-Length: \([0-9]*\)\r$/\1/p')"
 out="$(respond_sse)"
 printf '%s' "${out}" | grep -qi $'X-Accel-Buffering: no\r' \
   || { echo "FAIL: X-Accel-Buffering missing from SSE"; printf '%s' "${out}" | od -c | head; exit 1; }
+
+# gzip negotiation: accepted + sizeable body -> Content-Encoding: gzip, round-trips
+declare -A HTTP_HEADERS=([accept-encoding]="gzip, deflate, br")
+STATUS=200; HEADERS=(); BODY="$(head -c 2048 /dev/zero | tr '\0' 'a')"
+respond_request > "${_tmpdir}/resp"
+grep -qi $'Content-Encoding: gzip\r' "${_tmpdir}/resp" \
+  || { echo "FAIL: expected gzip encoding"; exit 1; }
+off=0
+while IFS= read -r line; do
+  line="${line%$'\r'}"
+  off=$(( off + ${#line} + 2 ))   # line + CRLF
+  [[ -z "${line}" ]] && break
+done < "${_tmpdir}/resp"
+dd if="${_tmpdir}/resp" bs=1 skip="${off}" 2>/dev/null | gunzip -c | grep -qF "${BODY}" \
+  || { echo "FAIL: gunzip round-trip failed"; exit 1; }
+
+# no gzip in Accept-Encoding -> identity
+declare -A HTTP_HEADERS=([accept-encoding]="br")
+out="$(respond_request)"
+if printf '%s' "${out}" | grep -qi 'Content-Encoding'; then
+  echo "FAIL: must not encode when gzip unsupported"; exit 1
+fi

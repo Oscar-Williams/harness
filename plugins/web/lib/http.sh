@@ -5,6 +5,7 @@
 
 STATUS=200
 HEADERS=()
+declare -A HTTP_HEADERS=() # request headers (set by the handler; read for negotiation)
 BODY=""
 
 respond()  { printf 'HTTP/1.1 %s %s\r\n' "$1" "$2"; }
@@ -13,17 +14,34 @@ end_headers() { printf '\r\n'; }
 
 respond_request() {
   respond "$STATUS" "$(_status_reason "$STATUS")"
-  local h
+  local h z=""
+  # Stateless per-response compression: transcripts are highly repetitive
+  # markup (~7x smaller). Compressed bytes go via a temp file — bash command
+  # substitution strips NULs and would corrupt the stream.
+  if [[ "${HTTP_HEADERS[accept-encoding]:-}" == *gzip* && "${#BODY}" -gt 511 ]]; then
+    z="$(mktemp)"
+    printf '%s' "$BODY" | gzip -c > "${z}"
+  fi
   for h in "${HEADERS[@]}"; do printf '%s\r\n' "$h"; done
   # Session pages are dynamic per-request; without this, mobile browsers
   # can serve stale copies from heuristic cache during reconnects.
   header Cache-Control "no-store"
   # Explicit framing (bytes, not chars: transcripts carry UTF-8) so proxies
   # never have to buffer close-delimited responses.
-  header Content-Length "$(printf '%s' "$BODY" | wc -c)"
+  if [[ -n "${z}" ]]; then
+    header Content-Encoding gzip
+    header Content-Length "$(wc -c < "${z}" | tr -d ' ')"
+  else
+    header Content-Length "$(printf '%s' "$BODY" | wc -c)"
+  fi
   header Connection close
   end_headers
-  printf '%s' "$BODY"
+  if [[ -n "${z}" ]]; then
+    cat "${z}"
+    rm -f "${z}"
+  else
+    printf '%s' "$BODY"
+  fi
 }
 
 _status_reason() {
