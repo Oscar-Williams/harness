@@ -94,7 +94,12 @@ CSS
   if (hb) {
     let lastBeat = Date.now();
     new MutationObserver(() => { lastBeat = Date.now(); }).observe(hb, {attributes: true, attributeFilter: ['data-t']});
-    setInterval(() => { if (Date.now() - lastBeat > 45000) location.reload(); }, 5000);
+    // Frozen mobile tabs: timers and the stream both die while hidden, so a
+    // stale beat after backgrounding says nothing. Reset the window on
+    // return and only judge staleness in the foreground — reloads fired
+    // mid-resume raced the radio and landed on Chrome error pages.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) lastBeat = Date.now(); });
+    setInterval(() => { if (!document.hidden && Date.now() - lastBeat > 45000) location.reload(); }, 5000);
     document.addEventListener('datastar-fetch', e => { if (e.detail?.type === 'retries-failed') location.reload(); });
   }
 })();
