@@ -55,10 +55,14 @@ has 'user · 09-19 04:40:14'
 has 'assistant · 09-19 04:41:02'
 has 'inspect renderer · 09-19 04:41:03'
 # thinking and tool_call collapse; call labeled name · intent; YAML body
-has '<details class="seg think"><summary>thinking</summary>'
-has '<details class="seg call"><summary>bash · inspect renderer</summary>'
+has '<details class="seg think" id="m0002s1"><summary>thinking</summary>'
+has '<details class="seg call" id="m0002s2"><summary>bash · inspect renderer</summary>'
+# stable ids on collapsibles: morph pairing + open-state preservation
+has 'id="m0002s1"'
+has 'id="m0002s2"'
+has 'id="m0003"'
 has 'command: sed -n 1p pages.sh'
 # tool_result collapse with error handling
-has '<details class="msg tool_result"><summary>'
+has '<details class="msg tool_result" id="m0003"><summary>'
 # escaped content stays escaped
 echo "${html}" | grep -qF 'Pondering the renderer.'

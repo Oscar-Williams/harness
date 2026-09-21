@@ -490,6 +490,31 @@ $(_stop_btn "$(html_escape "${id}")")
   btn.addEventListener('click', () => { scroll.scrollTop = scroll.scrollHeight; });
   scroll.scrollTop = scroll.scrollHeight;
 })();
+// <details> open state survives morphs. Toggling sets the open ATTRIBUTE,
+// and a morph syncs attributes from server HTML — which never carries it —
+// so patches would collapse everything the user expanded. Record user
+// toggles by element id and re-apply after patches strip them.
+(() => {
+  const t = document.getElementById('transcript');
+  if (!t) return;
+  const open = new Set();
+  t.addEventListener('click', e => {
+    const sum = e.target.closest('summary');
+    const d = sum && sum.parentElement;
+    if (!d || !d.id) return;
+    // activation (attribute toggle) happens after dispatch; read after
+    queueMicrotask(() => { d.open ? open.add(d.id) : open.delete(d.id); });
+  }, true);
+  new MutationObserver(muts => {
+    for (const m of muts) {
+      const el = m.target;
+      if (el.open || !el.id || !open.has(el.id)) continue;
+      // after the user's own close finishes (microtask above runs first),
+      // the id is gone from the set and this restore becomes a no-op
+      setTimeout(() => { if (open.has(el.id) && !el.open) el.open = true; }, 0);
+    }
+  }).observe(t, {subtree: true, attributes: true, attributeFilter: ['open']});
+})();
 </script>
 EOF
 }
@@ -521,9 +546,11 @@ _transcript() { # $1 = id
         html = html "<div class=\"seg text\"><pre>" esc(textbuf) "</pre></div>\n"
       textbuf = ""
     }
+    function segid() { return "m" seq "s" ++segk }
+
     function flushseg( lbl, y2, LL) {
       if (seg == "think") {
-        html = html "<details class=\"seg think\"><summary>thinking</summary><pre>" esc(buf) "</pre></details>\n"
+        html = html "<details class=\"seg think\" id=\"" segid() "\"><summary>thinking</summary><pre>" esc(buf) "</pre></details>\n"
       } else if (seg == "call") {
         y2 = json2yaml(cbuf); if (y2 == "") y2 = cbuf
         lbl = vm["intent"]
@@ -535,7 +562,7 @@ _transcript() { # $1 = id
           if (length(lbl) > 60) lbl = substr(lbl, 1, 57) "..."
           lbl = " · " lbl
         }
-        html = html "<details class=\"seg call\"><summary>" esc(cname lbl) "</summary><pre>" esc(y2) "</pre></details>\n"
+        html = html "<details class=\"seg call\" id=\"" segid() "\"><summary>" esc(cname lbl) "</summary><pre>" esc(y2) "</pre></details>\n"
       }
       seg = ""; buf = ""; cbuf = ""
     }
@@ -544,11 +571,12 @@ _transcript() { # $1 = id
     FNR == 1 {
       sep = 0; role = ""; open = 0; body = ""
       ts = ""; intent = ""; tool = ""; terr = ""
-      seg = ""; buf = ""; cbuf = ""; cname = ""; textbuf = ""; html = ""
+      seg = ""; buf = ""; cbuf = ""; cname = ""; textbuf = ""; html = ""; segk = 0
       split("", vm)
     }
     !open && $0 == "---" { sep++; if (sep == 2) open = 1; next }
     !open && /^role: /      { role = substr($0, 7); next }
+    !open && /^seq: /       { seq = substr($0, 6); next }
     !open && /^timestamp: / { ts = substr($0, 12); next }
     !open && /^intent: /    { intent = substr($0, 9); next }
     !open && /^tool: /      { tool = substr($0, 7); next }
@@ -580,7 +608,7 @@ _transcript() { # $1 = id
         # intent labels the collapsed result; failures stay expanded
         sum = intent != "" ? intent : (tool != "" ? tool : "tool_result")
         dopen = terr == "true" ? " open" : ""
-        printf "<details class=\"msg tool_result\"%s><summary>%s · %s</summary><pre>%s</pre></details>", dopen, esc(sum), esc(tsfmt(ts)), esc(body)
+        printf "<details class=\"msg tool_result\" id=\"m%s\"%s><summary>%s · %s</summary><pre>%s</pre></details>", seq, dopen, esc(sum), esc(tsfmt(ts)), esc(body)
       } else {
         printf "<div class=\"msg %s\"><div class=\"meta\">%s · %s</div><pre>%s</pre></div>", esc(role), esc(role), esc(tsfmt(ts)), esc(body)
       }

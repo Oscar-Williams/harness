@@ -18,9 +18,14 @@ and this project adheres to Semantic Versioning.
 
 ### Changed
 
+- Transcript patches transmit only when the rendered HTML actually changes (render → hash → compare): `.stream` churn during live turns no longer re-sends megabyte transcripts.
+
 - Single flat-JSON→YAML implementation (`plugins/core/lib/yaml.awk`, awk) shared by tool-result persistence and the web transcript; `render-result` is a thin driver over it. Hooks guard against a renderer failing silently (exit 0, empty output) by falling back to the raw result.
 
 ### Fixed
+
+- Mobile tab-return artifacts (stale cached page / Chrome error page): session HTML now served `Cache-Control: no-store`, non-SSE responses carry byte-accurate `Content-Length`, SSE asks proxies not to buffer (`X-Accel-Buffering: no`), and the stream watchdog only judges staleness in the foreground with a grace window on tab return.
+- Live patches collapsed user-expanded `<details>` blocks: toggling sets the `open` attribute, which morphs sync away from server HTML. Transcript collapsibles now carry stable ids (`m<seq>`, `m<seq>s<n>`) and the page re-applies recorded open state after each patch.
 
 - Live transcript truncation after page load: `\r` inside message bodies (CRLF-bearing tool results) split SSE `data:` lines mid-HTML per the SSE spec, so client-side morphs applied truncated transcripts and everything after the first CR vanished. `sse_patch` now strips CRs at the transport boundary.
 
