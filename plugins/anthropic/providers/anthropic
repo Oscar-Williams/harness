@@ -185,7 +185,16 @@ if [[ "${streaming}" == true ]]; then
                 '. + [{type: "thinking", thinking: $t, signature: $s}]')"
               ;;
             tool_use)
-              parsed_input="$(echo "${block_input}" | jq -c '.' 2>/dev/null || echo '{}')"
+              # A failed args parse must never silently become {} input: the
+              # tool would run with every field null (the 'path null' class).
+              # Log it, dispatch an error result so the model retries, keep
+              # {} only for the saved shape.
+              if ! parsed_input="$(echo "${block_input}" | jq -c '.' 2>/dev/null)"; then
+                echo "[harness] tool args parse failed: id=${block_id} name=${block_name} bytes=${#block_input}" >> "${HARNESS_LOG:-/dev/null}" 2>/dev/null || true
+                printf '%s' '{"result":"error: tool arguments failed to parse (stream corruption) - retry the call","error":true}' \
+                  > "${HARNESS_SESSION}/.tool_dispatch/${block_id}.json" 2>/dev/null || true
+                parsed_input="{}"
+              fi
               printf '%s' "${parsed_input}" > "${_bf3}"
               content="$(echo "${content}" | jq -c \
                 --arg id "${block_id}" --arg name "${block_name}" --rawfile input "${_bf3}" \
