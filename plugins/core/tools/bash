@@ -74,10 +74,20 @@ JSON
     if command -v setsid &>/dev/null; then
       setsid --wait "${_bash}" -c "${command}" >"${_out}" 2>"${_err}" & _pid=$!
       # Watchdog output silenced: an orphaned inner sleep must never
-      # inherit (and hold open) this tool's stdout pipe.
-      ( sleep "${_timeout}"; touch "${_killed}";
-        kill -TERM -- "-${_pid}" 2>/dev/null; sleep 5;
-        kill -KILL -- "-${_pid}" 2>/dev/null ) >/dev/null 2>&1 & _wd=$!
+      # inherit (and hold open) this tool's stdout pipe. Ticks instead of
+      # sleeping out the whole timeout: if the tool process itself dies
+      # (killed agent turn), the watchdog exits within a tick instead of
+      # living out a day-scale agent-specified timeout.
+      ( _t=0
+        while (( _t < _timeout )) && kill -0 "${PPID}" 2>/dev/null; do
+          sleep 1; _t=$(( _t + 1 ))
+        done
+        if kill -0 "${PPID}" 2>/dev/null; then
+          touch "${_killed}"
+          kill -TERM -- "-${_pid}" 2>/dev/null; sleep 5
+          kill -KILL -- "-${_pid}" 2>/dev/null
+        fi
+      ) >/dev/null 2>&1 & _wd=$!
       wait "${_pid}" 2>/dev/null || _rc=$?
       kill "${_wd}" 2>/dev/null || true; wait "${_wd}" 2>/dev/null || true
     elif command -v timeout &>/dev/null; then
@@ -85,7 +95,12 @@ JSON
     else
       # macOS fallback: background + watchdog kill (no GNU timeout, no setsid)
       "${_bash}" -c "${command}" >"${_out}" 2>"${_err}" & _pid=$!
-      ( sleep "${_timeout}" && kill "${_pid}" 2>/dev/null ) & _wd=$!
+      ( _t=0
+        while (( _t < _timeout )) && kill -0 "${PPID}" 2>/dev/null; do
+          sleep 1; _t=$(( _t + 1 ))
+        done
+        if kill -0 "${PPID}" 2>/dev/null; then kill "${_pid}" 2>/dev/null; fi
+      ) & _wd=$!
       wait "${_pid}" 2>/dev/null || _rc=$?
       kill "${_wd}" 2>/dev/null || true; wait "${_wd}" 2>/dev/null || true
     fi

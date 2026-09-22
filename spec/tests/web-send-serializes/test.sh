@@ -22,6 +22,9 @@ log="${_tmpdir}/runs.log"
 _HS="${_tmpdir}/harness-stub"
 cat > "${_HS}" <<'STUB'
 #!/usr/bin/env bash
+# Self-bound: teardown kills nothing; a straggler mid-sleep must still exit
+# on its own instead of leaking a flock holder forever.
+[[ -n "${STUB_BOUNDED:-}" ]] || STUB_BOUNDED=1 exec timeout 10 "$0" "$@"
 (
   flock 11
   printf 'start %s\n' "$2" >> "${RUNS_LOG}"

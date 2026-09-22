@@ -27,6 +27,9 @@ and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- Bash tool watchdogs tick (1s) and exit when their tool process dies, instead of sleeping out the full agent-specified timeout — interrupted turns no longer orphan day-scale `sleep` timers.
+- `web-send-*` spec stubs self-bound with `timeout 10`, so teardown no longer leaks flock-holding driver processes.
+
 - Mobile tab-return artifacts (stale cached page / Chrome error page): session HTML now served `Cache-Control: no-store`, non-SSE responses carry byte-accurate `Content-Length`, SSE asks proxies not to buffer (`X-Accel-Buffering: no`), and the stream watchdog only judges staleness in the foreground with a grace window on tab return.
 - Live patches collapsed user-expanded `<details>` blocks: toggling sets the `open` attribute, which morphs sync away from server HTML. Transcript collapsibles now carry stable ids (`m<seq>`, `m<seq>s<n>`) and the page re-applies recorded open state after each patch.
 

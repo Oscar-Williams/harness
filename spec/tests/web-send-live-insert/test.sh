@@ -21,6 +21,9 @@ _HS_DIR="${_tmpdir}/harness-stub/plugins/core/commands"
 mkdir -p "${_HS_DIR}"
 cat > "${_HS_DIR}/agent" <<'STUB'
 #!/usr/bin/env bash
+# Self-bound: if a run is still going when the test teardown deletes this
+# tmpdir, the driver must still die on its own instead of leaking forever.
+[[ -n "${STUB_BOUNDED:-}" ]] || STUB_BOUNDED=1 exec timeout 10 "$0" "$@"
 printf 'run %s\n' "$2" >> "${RUNS_LOG}"
 exec 9>>"${HARNESS_SESSIONS}/$1/.lock"
 flock 9
