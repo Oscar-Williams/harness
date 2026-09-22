@@ -27,6 +27,8 @@ and this project adheres to Semantic Versioning.
 
 ### Fixed
 
+- tool_exec treats pre-dispatch results as a cache, not authority: unparseable/truncated `.tool_dispatch` artifacts are dropped and the tool re-executed with the canonical input (the silent-corruption class that produced null-path executions and empty results).
+
 - Bash tool watchdogs tick (1s) and exit when their tool process dies, instead of sleeping out the full agent-specified timeout — interrupted turns no longer orphan day-scale `sleep` timers.
 - `web-send-*` spec stubs self-bound with `timeout 10`, so teardown no longer leaks flock-holding driver processes.
 

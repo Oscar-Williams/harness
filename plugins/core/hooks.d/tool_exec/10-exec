@@ -34,6 +34,13 @@ error=false
 
 # Check for pre-dispatched result from streaming parallel execution
 _precomputed="${HARNESS_SESSION}/.tool_dispatch/${call_id}.json"
+# A dispatch artifact is a cache, not authority: if it is truncated or
+# unparseable (the silent-corruption class), drop it and execute the
+# canonical input from the state JSON instead.
+if [[ -f "${_precomputed}" ]] && ! jq -e 'has("result") and (.error | type == "boolean")' "${_precomputed}" >/dev/null 2>&1; then
+  echo "[harness] invalid pre-dispatch result for ${tool_name} ${call_id}; re-executing canonically" >> "${HARNESS_LOG:-/dev/null}" 2>/dev/null || true
+  rm -f "${_precomputed}"
+fi
 if [[ -f "${_precomputed}" ]]; then
   result="$(jq -r '.result' "${_precomputed}")"
   [[ "$(jq -r '.error' "${_precomputed}")" == "true" ]] && error=true
