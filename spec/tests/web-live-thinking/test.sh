@@ -25,7 +25,6 @@ sleep 0.8
 
 n() { grep -c '=== PUSH' "${_tmpdir}/pushes" 2>/dev/null || echo 0; }
 last() { awk '/=== PUSH/{buf="";p=1;next} /=== END/{p=0;last=buf;next} p{buf=buf $0 "\n"} END{printf "%s",last}' "${_tmpdir}/pushes"; }
-live_pushes() { grep -c 'id="live"' "${_tmpdir}/pushes"; }
 
 base="$(n)"
 

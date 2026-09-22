@@ -53,7 +53,7 @@ for _ in $(seq 1 50); do [[ -f "${runs}" ]] && break; sleep 0.1; done
 before="$(grep -c '^run ' "${runs}" || true)"
 dir="${sessions}/${sid}"
 _insert_live_message "${dir}" "steer: use the fast path"
-inserted="$(ls "${dir}/messages" | grep -c 'user\.md$')"
+inserted="$(ls "${dir}/messages" | grep -c 'user\.md$' || true)"
 assert_eq "message inserted" "${inserted}" "1"
 grep -q 'steer: use the fast path' "${dir}/messages/"*-user.md \
   || { echo "FAIL: message content wrong"; exit 1; }

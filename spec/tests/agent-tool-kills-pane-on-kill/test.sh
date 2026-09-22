@@ -37,7 +37,7 @@ for _ in $(seq 1 50); do
   [[ -s "${TMUX_LOG}" ]] && grep -q split-window "${TMUX_LOG}" && break
   sleep 0.1
 done
-PANE_CHILD_PID="$(pgrep -f "^sleep 30$" | head -1)"
+PANE_CHILD_PID="$(pgrep -f "^sleep 30$" | head -1 || true)"
 export PANE_CHILD_PID
 sleep 0.5
 
